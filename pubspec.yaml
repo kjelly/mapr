@@ -1,0 +1,11 @@
+name: mapr
+dependencies:
+    args:
+    threading:
+    ansicolor:
+    colorize: any
+    dart_console:
+    console:
+    cli_repl:
+    dcache:
+    uuid: ^2.2.2
