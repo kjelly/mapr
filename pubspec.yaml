@@ -9,3 +9,4 @@ dependencies:
     cli_repl:
     dcache:
     uuid: ^2.2.2
+    tuple: ^1.0.3

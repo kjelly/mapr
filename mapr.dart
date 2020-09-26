@@ -5,6 +5,7 @@ import 'package:ansicolor/ansicolor.dart';
 import 'package:args/args.dart';
 import 'package:dcache/dcache.dart';
 import 'package:uuid/uuid.dart';
+import 'package:tuple/tuple.dart';
 
 Future<ProcessResult> run(String command, {String shell = "sh"}) {
   if (command.startsWith(RegExp('^!'))) {
@@ -133,6 +134,11 @@ class Lock {
   }
 }
 
+Tuple2<String, String> parseKeyValue(String s) {
+  var position = s.indexOf('=');
+  return Tuple2(s.substring(0, position), s.substring(position + 1, s.length));
+}
+
 class Setting {
   String name;
   String value;
@@ -213,34 +219,38 @@ class MapReduce {
 
   void initStrings() {
     for (var i in argResults['string']) {
-      var setting = Setting(i);
+      var parsedResult = parseKeyValue(i);
+      var key = parsedResult.item1;
+      var value = parsedResult.item2;
       for (var d in this.argList) {
-        d[setting.name] = setting.value;
+        d[key] = value;
       }
     }
   }
 
   void initLoops() {
     for (var i in this.argResults['loop']) {
-      var setting = Setting(i);
-      var position = setting.value.indexOf('-');
+      var parsedResult = parseKeyValue(i);
+      var key = parsedResult.item1;
+      var value = parsedResult.item2;
+      var position = value.indexOf('-');
       var start = 0;
       if (position == -1) {
-        var start = int.tryParse(setting.value) ?? 0;
+        var start = int.tryParse(value) ?? 0;
         for (var d in this.argList) {
-          d[setting.name] = start.toString();
+          d[key] = start.toString();
           start++;
         }
       } else {
-        start = int.tryParse(setting.value.substring(0, position)) ?? 0;
-        var end = int.tryParse(setting.value.substring(position + 1)) ??
+        start = int.tryParse(value.substring(0, position)) ?? 0;
+        var end = int.tryParse(value.substring(position + 1)) ??
             this.argList.length;
         for (var j = start; j < end; j++) {
           var position = j - start;
           if (position >= this.argList.length) {
             this.argList.add(Map<String, String>());
           }
-          this.argList[position][setting.name] = j.toString();
+          this.argList[position][key] = j.toString();
         }
       }
     }
