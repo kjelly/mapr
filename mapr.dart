@@ -45,6 +45,7 @@ void main(List<String> args) async {
   parser.addOption('worker', abbr: 'w', defaultsTo: "5");
   parser.addOption('reduce', abbr: 'r', defaultsTo: "");
   parser.addOption('shell', defaultsTo: "sh");
+  parser.addOption('stdin', defaultsTo: "@stdin");
   parser.addOption('store-stdout',
       defaultsTo: "@stdout", help: "Start from 1. eg: @stdout1.");
   parser.addOption('store-stderr',
@@ -243,8 +244,8 @@ class MapReduce {
         }
       } else {
         start = int.tryParse(value.substring(0, position)) ?? 0;
-        var end = int.tryParse(value.substring(position + 1)) ??
-            this.argList.length;
+        var end =
+            int.tryParse(value.substring(position + 1)) ?? this.argList.length;
         for (var j = start; j < end; j++) {
           var position = j - start;
           if (position >= this.argList.length) {
@@ -276,6 +277,28 @@ class MapReduce {
     }
   }
 
+  void initStdin() {
+    var key = this.argResults['stdin'];
+    var index = 0;
+
+    while (true) {
+      var line = stdin.readLineSync(encoding: Encoding.getByName('utf-8'));
+      if(line == null){
+        break;
+      }
+      line = line.trim();
+      if (line.length == 0) {
+        continue;
+      }
+      if (index >= this.argList.length) {
+        this.argList.add(Map<String, String>());
+      }
+      var d = this.argList[index];
+      d[key] = line;
+      index += 1;
+    }
+  }
+
   void initStroe() {
     var stdout = this.argResults['store-stdout'].toString();
     var stderr = this.argResults['store-stderr'].toString();
@@ -295,6 +318,7 @@ class MapReduce {
     await this.initCommands();
     this.initFiles();
     this.initLoops();
+    this.initStdin();
     this.initTempFiles();
     this.initStrings();
     this.initUUID();
