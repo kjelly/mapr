@@ -42,14 +42,20 @@ void main(List<String> args) async {
       abbr: "u", help: 'Replace the name with the uuid', valueHelp: 'name');
   parser.addMultiOption('loop',
       abbr: "l", help: 'generate number', valueHelp: 'name');
+  parser.addMultiOption('exception',
+      help: 'generate number', valueHelp: 'The command to be run when error.');
+  parser.addMultiOption('final',
+      help: 'generate number', valueHelp: 'The command to be run when error.');
   parser.addOption('worker', abbr: 'w', defaultsTo: "5");
   parser.addOption('reduce', abbr: 'r', defaultsTo: "");
   parser.addOption('shell', defaultsTo: "sh");
-  parser.addOption('stdin', defaultsTo: "@stdin");
+  parser.addOption('stdin', defaultsTo: "");
   parser.addOption('store-stdout',
       defaultsTo: "@stdout", help: "Start from 1. eg: @stdout1.");
   parser.addOption('store-stderr',
       defaultsTo: "@stderr", help: "Start from 1. eg: @stderr1.");
+  parser.addOption('store-status',
+      defaultsTo: "@status", help: "Start from 1. eg: @stderr1.");
 
   parser.addFlag('help', abbr: "h", negatable: false);
   parser.addFlag('error',
@@ -57,6 +63,10 @@ void main(List<String> args) async {
   parser.addFlag('stdout', defaultsTo: true, help: 'Print the stdout');
   parser.addFlag('stderr', defaultsTo: true, help: 'Print the stderr');
   parser.addFlag('header', defaultsTo: true, help: 'Show the header');
+  parser.addFlag('print-exception',
+      defaultsTo: false, help: 'Show the exception results');
+  parser.addFlag('print-final',
+      defaultsTo: false, help: 'Show the final results');
   parser.addFlag('last',
       defaultsTo: false, help: 'Show the output of the last command');
 
@@ -280,10 +290,13 @@ class MapReduce {
   void initStdin() {
     var key = this.argResults['stdin'];
     var index = 0;
+    if(key.length == 0){
+      return;
+    }
 
     while (true) {
       var line = stdin.readLineSync(encoding: Encoding.getByName('utf-8'));
-      if(line == null){
+      if (line == null) {
         break;
       }
       line = line.trim();
@@ -302,12 +315,16 @@ class MapReduce {
   void initStroe() {
     var stdout = this.argResults['store-stdout'].toString();
     var stderr = this.argResults['store-stderr'].toString();
+    var status = this.argResults['store-status'].toString();
     for (var i = 0; i < argList.length; i++) {
       if (stdout.length > 0) {
         this.argList[i][stdout] = '${this.tempDir.path}/$i-stdout';
       }
       if (stderr.length > 0) {
         this.argList[i][stderr] = '${this.tempDir.path}/$i-stderr';
+      }
+      if (status.length > 0) {
+        this.argList[i][status] = '${this.tempDir.path}/$i-status';
       }
     }
   }
@@ -332,6 +349,7 @@ class MapReduce {
       var lock = Lock(this.argList.length);
       var stdout = this.argResults['store-stdout'].toString();
       var stderr = this.argResults['store-stderr'].toString();
+      var status = this.argResults['store-status'].toString();
 
       for (var i in argList) {
         await worker.wait();
@@ -342,6 +360,7 @@ class MapReduce {
         var fp = Future.value(ProcessResult(0, 0, "", ""));
         var oldCommand = null;
         var commandIndex = 0;
+        var exception = false;
         worker.increase();
         for (var c in this.commandList.getRange(0, this.commandList.length)) {
           for (var k in i.keys) {
@@ -357,30 +376,97 @@ class MapReduce {
             if (p.pid != 0 && !this.argResults['last']) {
               showWrapper(privateOldCommand, p);
             }
-            await store(p, i[stdout] + privateCommandIndex.toString(),
-                i[stderr] + privateCommandIndex.toString());
+            await store(
+                p,
+                i[stdout] + privateCommandIndex.toString(),
+                i[stderr] + privateCommandIndex.toString(),
+                i[status] + privateCommandIndex.toString());
             if (p.exitCode == 0) {
               return this.runWrapper(c);
             }
+            exception = true;
             return null;
           });
           oldCommand = c;
           commandIndex += 1;
         }
-        fp?.then((p) async {
+        fp = fp?.then((p) async {
           if (p != null) {
-            await store(p, i[stdout] + commandIndex.toString(),
-                i[stderr] + commandIndex.toString());
+            await store(
+                p,
+                i[stdout] + commandIndex.toString(),
+                i[stderr] + commandIndex.toString(),
+                i[status] + commandIndex.toString());
             var privateOldCommand = oldCommand;
             var reduceCommand = this.argResults['reduce'].toString();
             if (reduceCommand.length == 0) {
               showWrapper(privateOldCommand, p);
             }
+            if(p.exitCode != 0){
+              exception = true;
+            }
           }
+
+          var processResultFuture = Future.value(ProcessResult(0, 0, "", ""));
+
+          if (exception) {
+            oldCommand = null;
+            for (var e in argResults['exception']) {
+              for (var k in i.keys) {
+                e = e.replaceAll(k, i[k]);
+              }
+              var privateOldCommand = oldCommand;
+              processResultFuture = processResultFuture?.then((p) async {
+                if (p == null) {
+                  return null;
+                }
+                if (p.pid != 0 && this.argResults['print-exception']) {
+                  showWrapper(privateOldCommand, p);
+                }
+                return this.runWrapper(e);
+              });
+              oldCommand = e;
+            }
+          }
+          var processResult = await processResultFuture;
+          if (processResult != null &&
+              processResult.pid != 0 &&
+              this.argResults['print-exception']) {
+            showWrapper(oldCommand, processResult);
+          }
+
+          processResultFuture = Future.value(ProcessResult(0, 0, "", ""));
+
+          for (var e in argResults['final']) {
+            for (var k in i.keys) {
+              e = e.replaceAll(k, i[k]);
+            }
+            var privateOldCommand = oldCommand;
+            processResultFuture = processResultFuture?.then((p) async {
+              if (p == null) {
+                return null;
+              }
+              if (p.pid != 0 && this.argResults['print-final']) {
+                showWrapper(privateOldCommand, p);
+              }
+              return this.runWrapper(e);
+            });
+            oldCommand = e;
+          }
+
+          processResult = await processResultFuture;
+          if (processResult != null &&
+              processResult.pid != 0 &&
+              this.argResults['print-final']) {
+            showWrapper(oldCommand, processResult);
+          }
+
           worker.decrease();
           lock.decrease();
+          return Future.value(ProcessResult(0, 0, "", ""));
         });
       }
+
       await lock.wait();
     }
     return this;
@@ -425,12 +511,12 @@ class MapReduce {
     this.tempDir.delete(recursive: true);
   }
 
-  void store(
-      ProcessResult p, String stdoutFilePath, String stderrFilePath) async {
+  void store(ProcessResult p, String stdoutFilePath, String stderrFilePath,
+      String statusFilePath) async {
     if (p == null || p?.pid == 0) {
       return;
     }
-    var lock = Lock(2);
+    var lock = Lock(3);
 
     File(stdoutFilePath).open(mode: FileMode.write).then((f) {
       f.writeStringSync(p.stdout);
@@ -443,6 +529,13 @@ class MapReduce {
       f.closeSync();
       lock.decrease();
     });
+
+    File(statusFilePath).open(mode: FileMode.write).then((f) {
+      f.writeStringSync(p.exitCode.toString());
+      f.closeSync();
+      lock.decrease();
+    });
+
     await lock.wait();
   }
 }
