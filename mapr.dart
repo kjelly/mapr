@@ -9,13 +9,10 @@ import 'package:tuple/tuple.dart';
 
 Future<ProcessResult> run(String command, {String shell = "sh"}) {
   if (command.startsWith(RegExp('^!'))) {
-    var firstSpaceIndex = command.indexOf(RegExp(" "));
-    var programName = command.substring(1, firstSpaceIndex);
-    var arguments =
-        (jsonDecode(command.substring(firstSpaceIndex, command.length))
-                as List<dynamic>)
+    var processArguments =
+        (jsonDecode(command.substring(1, command.length)) as List<dynamic>)
             .cast<String>();
-    return Process.run(programName, arguments);
+    return Process.run(processArguments[0], processArguments.sublist(1));
   }
   return Process.run('sh', ['-c', command]);
 }
