@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:meta/meta.dart';
 import 'package:ansicolor/ansicolor.dart';
 import 'package:args/args.dart';
 import 'package:dcache/dcache.dart';
 import 'package:uuid/uuid.dart';
 import 'package:tuple/tuple.dart';
+import 'package:yaml/yaml.dart';
 
 Future<ProcessResult> run(String command, {String shell = "sh"}) {
   if (command.startsWith(RegExp('^!'))) {
@@ -47,6 +49,7 @@ void main(List<String> args) async {
   parser.addOption('reduce', abbr: 'r', defaultsTo: "");
   parser.addOption('shell', defaultsTo: "sh");
   parser.addOption('stdin', defaultsTo: "");
+  parser.addOption('yaml-config', defaultsTo: "");
   parser.addOption('store-stdout',
       defaultsTo: "@stdout", help: "Start from 1. eg: @stdout1.");
   parser.addOption('store-stderr',
@@ -74,13 +77,47 @@ void main(List<String> args) async {
     print(parser.usage);
     return;
   }
-  if (argResults.rest.length == 0 && reduceCommand.length == 0) {
+  var flags = Map<String, bool>();
+  var options = Map<String, String>();
+  var multiOptions = Map<String, List<String>>();
+
+  var configMap = YamlMap();
+  var configFile = File(argResults['yaml-config']);
+  if (configFile.existsSync()) {
+    configMap = loadYaml(configFile.readAsStringSync());
+  }
+
+  for (var i in MapReduce.flagNames) {
+    flags[i] = argResults[i] ?? configMap[i];
+  }
+
+  for (var i in MapReduce.optionNames) {
+    options[i] = argResults[i] ?? configMap[i];
+  }
+
+  for (var i in MapReduce.multiOptionNames) {
+    multiOptions[i] = argResults[i] ?? configMap[i];
+  }
+
+  print(configMap);
+
+  if ((argResults.rest.length == 0 && reduceCommand.length == 0) &&
+      (configMap['run'] == null || configMap['run']?.length == 0)) {
     print("acommand [OPTIONS]... COMMAND [COMMAND]...");
     print(parser.usage);
     return;
   }
 
-  MapReduce(argResults.rest, argResults).init().then((m) async {
+  MapReduce(configMap['run']?.cast<String>() ?? argResults.rest,
+      flags: flags,
+      options: options,
+      multiOptions: multiOptions, callback: (String command, ProcessResult p) {
+    show(command, p,
+        showError: flags['error'],
+        stdout: flags['stdout'],
+        stderr: flags['stderr'],
+        header: flags['header']);
+  }).init().then((m) async {
     return m.map();
   }).then((m) {
     return m.reduce();
@@ -158,31 +195,57 @@ class Setting {
 }
 
 class MapReduce {
-  List<String> commandList;
-  ArgResults argResults;
-  List<Map<String, String>> argList = List<Map<String, String>>();
+  static final multiOptionNames = [
+    "file",
+    "command",
+    "string",
+    "tempfile",
+    "uuid",
+    "loop",
+    "exception",
+    "final"
+  ];
+  static final optionNames = [
+    "worker",
+    "reduce",
+    "shell",
+    "stdin",
+    "store-stdout",
+    "store-stderr",
+    "store-status"
+  ];
+  static final flagNames = [
+    "error",
+    "stdout",
+    "stderr",
+    "header",
+    "print-exception",
+    "print-final",
+    "last"
+  ];
+  final List<String> commandList;
+  List<Map<String, String>> argList = <Map<String, String>>[];
   Directory tempDir;
+  Map<String, bool> flags;
+  Map<String, String> options;
+  Map<String, List<String>> multiOptions;
 
   Future<ProcessResult> Function(String) runWrapper;
-  Null Function(String, ProcessResult) showWrapper;
+  Null Function(String, ProcessResult) callback;
 
-  MapReduce(this.commandList, this.argResults) {
+  MapReduce(this.commandList,
+      {@required this.flags,
+      @required this.options,
+      @required this.multiOptions,
+      this.callback}) {
     this.argList.add(Map<String, String>()); // run least one time
     runWrapper = (String command) {
-      return run(command, shell: this.argResults['shell']);
-    };
-
-    showWrapper = (String command, ProcessResult p) {
-      show(command, p,
-          showError: argResults['error'],
-          stdout: argResults['stdout'],
-          stderr: argResults['stderr'],
-          header: argResults['header']);
+      return run(command, shell: options['shell']);
     };
   }
 
   void initFiles() {
-    for (var i in this.argResults['file']) {
+    for (var i in multiOptions['file']) {
       var index = 0;
       var parts = i.toString().split('=');
       var name = parts[0];
@@ -204,7 +267,7 @@ class MapReduce {
   }
 
   void initCommands() async {
-    for (var i in this.argResults['command']) {
+    for (var i in multiOptions['command']) {
       var index = 0;
       var parts = i.toString().split('=');
       var name = parts[0];
@@ -226,7 +289,7 @@ class MapReduce {
   }
 
   void initStrings() {
-    for (var i in argResults['string']) {
+    for (var i in multiOptions['string']) {
       var parsedResult = parseKeyValue(i);
       var key = parsedResult.item1;
       var value = parsedResult.item2;
@@ -237,7 +300,7 @@ class MapReduce {
   }
 
   void initLoops() {
-    for (var i in this.argResults['loop']) {
+    for (var i in multiOptions['loop']) {
       var parsedResult = parseKeyValue(i);
       var key = parsedResult.item1;
       var value = parsedResult.item2;
@@ -266,7 +329,7 @@ class MapReduce {
 
   void initTempFiles() {
     var uuid = Uuid();
-    for (var i in this.argResults['tempfile']) {
+    for (var i in multiOptions['tempfile']) {
       for (var d in this.argList) {
         var filename = uuid.v4();
         d[i] = "${this.tempDir.path}/$filename";
@@ -277,7 +340,7 @@ class MapReduce {
 
   void initUUID() {
     var uuid = Uuid();
-    for (var i in this.argResults['uuid']) {
+    for (var i in multiOptions['uuid']) {
       for (var d in this.argList) {
         d[i] = uuid.v4();
       }
@@ -285,9 +348,9 @@ class MapReduce {
   }
 
   void initStdin() {
-    var key = this.argResults['stdin'];
+    var key = options['stdin'];
     var index = 0;
-    if(key.length == 0){
+    if (key.length == 0) {
       return;
     }
 
@@ -310,9 +373,9 @@ class MapReduce {
   }
 
   void initStroe() {
-    var stdout = this.argResults['store-stdout'].toString();
-    var stderr = this.argResults['store-stderr'].toString();
-    var status = this.argResults['store-status'].toString();
+    var stdout = options['store-stdout'].toString();
+    var stderr = options['store-stderr'].toString();
+    var status = options['store-status'].toString();
     for (var i = 0; i < argList.length; i++) {
       if (stdout.length > 0) {
         this.argList[i][stdout] = '${this.tempDir.path}/$i-stdout';
@@ -342,11 +405,11 @@ class MapReduce {
 
   Future<MapReduce> map() async {
     if (this.commandList.length > 0) {
-      var worker = Lock(1 - int.tryParse(this.argResults['worker']) ?? 5);
+      var worker = Lock(1 - int.tryParse(options['worker']) ?? 5);
       var lock = Lock(this.argList.length);
-      var stdout = this.argResults['store-stdout'].toString();
-      var stderr = this.argResults['store-stderr'].toString();
-      var status = this.argResults['store-status'].toString();
+      var stdout = options['store-stdout'].toString();
+      var stderr = options['store-stderr'].toString();
+      var status = options['store-status'].toString();
 
       for (var i in argList) {
         await worker.wait();
@@ -370,8 +433,8 @@ class MapReduce {
             if (p == null) {
               return null;
             }
-            if (p.pid != 0 && !this.argResults['last']) {
-              showWrapper(privateOldCommand, p);
+            if (p.pid != 0 && !flags['last']) {
+              callback(privateOldCommand, p);
             }
             await store(
                 p,
@@ -395,11 +458,11 @@ class MapReduce {
                 i[stderr] + commandIndex.toString(),
                 i[status] + commandIndex.toString());
             var privateOldCommand = oldCommand;
-            var reduceCommand = this.argResults['reduce'].toString();
+            var reduceCommand = options['reduce'].toString();
             if (reduceCommand.length == 0) {
-              showWrapper(privateOldCommand, p);
+              callback(privateOldCommand, p);
             }
-            if(p.exitCode != 0){
+            if (p.exitCode != 0) {
               exception = true;
             }
           }
@@ -408,7 +471,7 @@ class MapReduce {
 
           if (exception) {
             oldCommand = null;
-            for (var e in argResults['exception']) {
+            for (var e in multiOptions['exception']) {
               for (var k in i.keys) {
                 e = e.replaceAll(k, i[k]);
               }
@@ -417,8 +480,8 @@ class MapReduce {
                 if (p == null) {
                   return null;
                 }
-                if (p.pid != 0 && this.argResults['print-exception']) {
-                  showWrapper(privateOldCommand, p);
+                if (p.pid != 0 && flags['print-exception']) {
+                  callback(privateOldCommand, p);
                 }
                 return this.runWrapper(e);
               });
@@ -428,13 +491,13 @@ class MapReduce {
           var processResult = await processResultFuture;
           if (processResult != null &&
               processResult.pid != 0 &&
-              this.argResults['print-exception']) {
-            showWrapper(oldCommand, processResult);
+              flags['print-exception']) {
+            callback(oldCommand, processResult);
           }
 
           processResultFuture = Future.value(ProcessResult(0, 0, "", ""));
 
-          for (var e in argResults['final']) {
+          for (var e in multiOptions['final']) {
             for (var k in i.keys) {
               e = e.replaceAll(k, i[k]);
             }
@@ -443,8 +506,8 @@ class MapReduce {
               if (p == null) {
                 return null;
               }
-              if (p.pid != 0 && this.argResults['print-final']) {
-                showWrapper(privateOldCommand, p);
+              if (p.pid != 0 && flags['print-final']) {
+                callback(privateOldCommand, p);
               }
               return this.runWrapper(e);
             });
@@ -454,8 +517,8 @@ class MapReduce {
           processResult = await processResultFuture;
           if (processResult != null &&
               processResult.pid != 0 &&
-              this.argResults['print-final']) {
-            showWrapper(oldCommand, processResult);
+              flags['print-final']) {
+            callback(oldCommand, processResult);
           }
 
           worker.decrease();
@@ -470,13 +533,12 @@ class MapReduce {
   }
 
   Future<MapReduce> reduce() async {
-    var reduceCommand = this.argResults['reduce'].toString();
+    var reduceCommand = options['reduce'].toString();
     if (reduceCommand.length > 0) {
       for (var i in this.argList[0].keys) {
         if (reduceCommand.contains(i)) {
           var s = '';
-          if (i == this.argResults['store-stdout'] ||
-              i == this.argResults['store-stderr']) {
+          if (i == options['store-stdout'] || i == options['store-stderr']) {
             var re = RegExp(i + '([0-9])+');
             for (var match in re.allMatches(reduceCommand)) {
               var number = match.group(1);
@@ -496,7 +558,7 @@ class MapReduce {
       }
       var lock = Lock(1);
       runWrapper(reduceCommand).then((p) {
-        show(reduceCommand, p, showError: argResults['error']);
+        show(reduceCommand, p, showError: flags['error']);
         lock.decrease();
       });
       await lock.wait();

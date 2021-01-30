@@ -10,3 +10,8 @@ dependencies:
     dcache:
     uuid: ^2.2.2
     tuple: ^1.0.3
+    meta: ^1.2.4
+    yaml: ^2.2.1
+environment:
+  sdk: '>=2.10.0 <3.0.0'
+
