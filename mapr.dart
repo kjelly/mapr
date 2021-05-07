@@ -1,15 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:meta/meta.dart';
-import 'package:ansicolor/ansicolor.dart';
 import 'package:args/args.dart';
-import 'package:dcache/dcache.dart';
 import 'package:uuid/uuid.dart';
 import 'package:tuple/tuple.dart';
 import 'package:yaml/yaml.dart';
 
-Future<ProcessResult> run(String command, {String shell = "sh"}) {
+Future<ProcessResult> run(String command, {String? shell = "sh"}) {
   if (command.startsWith(RegExp('^!'))) {
     var processArguments =
         (jsonDecode(command.substring(1, command.length)) as List<dynamic>)
@@ -81,22 +78,22 @@ void main(List<String> args) async {
   var options = Map<String, String>();
   var multiOptions = Map<String, List<String>>();
 
-  var configMap = YamlMap();
+  YamlMap configMap = YamlMap();
   var configFile = File(argResults['yaml-config']);
   if (configFile.existsSync()) {
     configMap = loadYaml(configFile.readAsStringSync());
   }
 
   for (var i in MapReduce.flagNames) {
-    flags[i] = argResults[i] ?? configMap[i];
+    flags[i] = configMap[i] ?? argResults[i];
   }
 
   for (var i in MapReduce.optionNames) {
-    options[i] = argResults[i] ?? configMap[i];
+    options[i] = configMap[i] ?? argResults[i];
   }
 
   for (var i in MapReduce.multiOptionNames) {
-    multiOptions[i] = argResults[i] ?? configMap[i];
+    multiOptions[i] = configMap[i] ?? argResults[i];
   }
 
   print(configMap);
@@ -109,14 +106,13 @@ void main(List<String> args) async {
   }
 
   MapReduce(configMap['run']?.cast<String>() ?? argResults.rest,
-      flags: flags,
-      options: options,
-      multiOptions: multiOptions, callback: (String command, ProcessResult p) {
+      flags: flags, options: options, multiOptions: multiOptions,
+      callback: (String command, ProcessResult p) {
     show(command, p,
-        showError: flags['error'],
-        stdout: flags['stdout'],
-        stderr: flags['stderr'],
-        header: flags['header']);
+        showError: flags['error']!,
+        stdout: flags['stdout']!,
+        stderr: flags['stderr']!,
+        header: flags['header']!);
   }).init().then((m) async {
     return m.map();
   }).then((m) {
@@ -131,9 +127,6 @@ void show(String command, ProcessResult p,
     bool stdout = true,
     bool stderr = true,
     bool header = true}) {
-  if (p == null || p?.pid == 0) {
-    return;
-  }
   var error = '';
 
   if (p.exitCode != 0) {
@@ -172,7 +165,7 @@ class Lock {
     this.v--;
   }
 
-  void wait({microseconds: 1000}) async {
+  Future<void> wait({microseconds: 1000}) async {
     while (this.v > 0) {
       await Future.delayed(Duration(microseconds: microseconds));
     }
@@ -185,8 +178,8 @@ Tuple2<String, String> parseKeyValue(String s) {
 }
 
 class Setting {
-  String name;
-  String value;
+  late final String name;
+  late final String value;
   Setting(String s) {
     var position = s.indexOf('=');
     this.name = s.substring(0, position);
@@ -225,19 +218,19 @@ class MapReduce {
   ];
   final List<String> commandList;
   List<Map<String, String>> argList = <Map<String, String>>[];
-  Directory tempDir;
+  late Directory tempDir;
   Map<String, bool> flags;
   Map<String, String> options;
   Map<String, List<String>> multiOptions;
 
-  Future<ProcessResult> Function(String) runWrapper;
+  late Future<ProcessResult> Function(String) runWrapper;
   Null Function(String, ProcessResult) callback;
 
   MapReduce(this.commandList,
-      {@required this.flags,
-      @required this.options,
-      @required this.multiOptions,
-      this.callback}) {
+      {required this.flags,
+      required this.options,
+      required this.multiOptions,
+      required this.callback}) {
     this.argList.add(Map<String, String>()); // run least one time
     runWrapper = (String command) {
       return run(command, shell: options['shell']);
@@ -245,7 +238,7 @@ class MapReduce {
   }
 
   void initFiles() {
-    for (var i in multiOptions['file']) {
+    for (var i in multiOptions['file']!) {
       var index = 0;
       var parts = i.toString().split('=');
       var name = parts[0];
@@ -266,8 +259,8 @@ class MapReduce {
     }
   }
 
-  void initCommands() async {
-    for (var i in multiOptions['command']) {
+  Future<void> initCommands() async {
+    for (var i in multiOptions['command']!) {
       var index = 0;
       var parts = i.toString().split('=');
       var name = parts[0];
@@ -289,7 +282,7 @@ class MapReduce {
   }
 
   void initStrings() {
-    for (var i in multiOptions['string']) {
+    for (var i in multiOptions['string']!) {
       var parsedResult = parseKeyValue(i);
       var key = parsedResult.item1;
       var value = parsedResult.item2;
@@ -300,7 +293,7 @@ class MapReduce {
   }
 
   void initLoops() {
-    for (var i in multiOptions['loop']) {
+    for (var i in multiOptions['loop']!) {
       var parsedResult = parseKeyValue(i);
       var key = parsedResult.item1;
       var value = parsedResult.item2;
@@ -329,18 +322,18 @@ class MapReduce {
 
   void initTempFiles() {
     var uuid = Uuid();
-    for (var i in multiOptions['tempfile']) {
+    for (var i in multiOptions['tempfile']!) {
       for (var d in this.argList) {
         var filename = uuid.v4();
         d[i] = "${this.tempDir.path}/$filename";
-        File(d[i]).create();
+        File(d[i]!).create();
       }
     }
   }
 
   void initUUID() {
     var uuid = Uuid();
-    for (var i in multiOptions['uuid']) {
+    for (var i in multiOptions['uuid']!) {
       for (var d in this.argList) {
         d[i] = uuid.v4();
       }
@@ -348,14 +341,14 @@ class MapReduce {
   }
 
   void initStdin() {
-    var key = options['stdin'];
+    var key = options['stdin']!;
     var index = 0;
     if (key.length == 0) {
       return;
     }
 
     while (true) {
-      var line = stdin.readLineSync(encoding: Encoding.getByName('utf-8'));
+      var line = stdin.readLineSync(encoding: Encoding.getByName('utf-8')!);
       if (line == null) {
         break;
       }
@@ -405,7 +398,7 @@ class MapReduce {
 
   Future<MapReduce> map() async {
     if (this.commandList.length > 0) {
-      var worker = Lock(1 - int.tryParse(options['worker']) ?? 5);
+      var worker = Lock(1 - (int.tryParse(options['worker']!) ?? 5));
       var lock = Lock(this.argList.length);
       var stdout = options['store-stdout'].toString();
       var stderr = options['store-stderr'].toString();
@@ -415,32 +408,32 @@ class MapReduce {
         await worker.wait();
         var command = this.commandList[0];
         for (var k in i.keys) {
-          command = command.replaceAll(k, i[k]);
+          command = command.replaceAll(k, i[k]!);
         }
-        var fp = Future.value(ProcessResult(0, 0, "", ""));
-        var oldCommand = null;
+        Future<ProcessResult?> fp = Future.value(ProcessResult(0, 0, "", ""));
+        dynamic oldCommand = null;
         var commandIndex = 0;
         var exception = false;
         worker.increase();
         for (var c in this.commandList.getRange(0, this.commandList.length)) {
           for (var k in i.keys) {
-            c = c.replaceAll(k, i[k]);
+            c = c.replaceAll(k, i[k]!);
           }
 
           var privateOldCommand = oldCommand;
           var privateCommandIndex = commandIndex;
-          fp = fp?.then((p) async {
+          fp = fp.then((p) async {
             if (p == null) {
               return null;
             }
-            if (p.pid != 0 && !flags['last']) {
+            if (p.pid != 0 && !flags['last']!) {
               callback(privateOldCommand, p);
             }
             await store(
                 p,
-                i[stdout] + privateCommandIndex.toString(),
-                i[stderr] + privateCommandIndex.toString(),
-                i[status] + privateCommandIndex.toString());
+                i[stdout]! + privateCommandIndex.toString(),
+                i[stderr]! + privateCommandIndex.toString(),
+                i[status]! + privateCommandIndex.toString());
             if (p.exitCode == 0) {
               return this.runWrapper(c);
             }
@@ -450,13 +443,13 @@ class MapReduce {
           oldCommand = c;
           commandIndex += 1;
         }
-        fp = fp?.then((p) async {
+        fp = fp.then((p) async {
           if (p != null) {
             await store(
                 p,
-                i[stdout] + commandIndex.toString(),
-                i[stderr] + commandIndex.toString(),
-                i[status] + commandIndex.toString());
+                i[stdout]! + commandIndex.toString(),
+                i[stderr]! + commandIndex.toString(),
+                i[status]! + commandIndex.toString());
             var privateOldCommand = oldCommand;
             var reduceCommand = options['reduce'].toString();
             if (reduceCommand.length == 0) {
@@ -467,20 +460,21 @@ class MapReduce {
             }
           }
 
-          var processResultFuture = Future.value(ProcessResult(0, 0, "", ""));
+          Future<ProcessResult?> processResultFuture =
+              Future.value(ProcessResult(0, 0, "", ""));
 
           if (exception) {
             oldCommand = null;
-            for (var e in multiOptions['exception']) {
+            for (var e in multiOptions['exception']!) {
               for (var k in i.keys) {
-                e = e.replaceAll(k, i[k]);
+                e = e.replaceAll(k, i[k]!);
               }
               var privateOldCommand = oldCommand;
-              processResultFuture = processResultFuture?.then((p) async {
+              processResultFuture = processResultFuture.then((p) async {
                 if (p == null) {
                   return null;
                 }
-                if (p.pid != 0 && flags['print-exception']) {
+                if (p.pid != 0 && flags['print-exception']!) {
                   callback(privateOldCommand, p);
                 }
                 return this.runWrapper(e);
@@ -491,22 +485,22 @@ class MapReduce {
           var processResult = await processResultFuture;
           if (processResult != null &&
               processResult.pid != 0 &&
-              flags['print-exception']) {
+              flags['print-exception']!) {
             callback(oldCommand, processResult);
           }
 
           processResultFuture = Future.value(ProcessResult(0, 0, "", ""));
 
-          for (var e in multiOptions['final']) {
+          for (var e in multiOptions['final']!) {
             for (var k in i.keys) {
-              e = e.replaceAll(k, i[k]);
+              e = e.replaceAll(k, i[k]!);
             }
             var privateOldCommand = oldCommand;
-            processResultFuture = processResultFuture?.then((p) async {
+            processResultFuture = processResultFuture.then((p) async {
               if (p == null) {
                 return null;
               }
-              if (p.pid != 0 && flags['print-final']) {
+              if (p.pid != 0 && flags['print-final']!) {
                 callback(privateOldCommand, p);
               }
               return this.runWrapper(e);
@@ -517,7 +511,7 @@ class MapReduce {
           processResult = await processResultFuture;
           if (processResult != null &&
               processResult.pid != 0 &&
-              flags['print-final']) {
+              flags['print-final']!) {
             callback(oldCommand, processResult);
           }
 
@@ -544,13 +538,13 @@ class MapReduce {
               var number = match.group(1);
               s = '';
               for (var j = 0; j < this.argList.length; j++) {
-                s += this.argList[j][i] + number + ' ';
+                s += this.argList[j][i]! + number! + ' ';
               }
-              reduceCommand = reduceCommand.replaceAll(match.group(0), s);
+              reduceCommand = reduceCommand.replaceAll(match.group(0)!, s);
             }
           } else {
             for (var j = 0; j < this.argList.length; j++) {
-              s += argList[j][i] + ' ';
+              s += argList[j][i]! + ' ';
             }
             reduceCommand = reduceCommand.replaceAll(i, s);
           }
@@ -558,7 +552,7 @@ class MapReduce {
       }
       var lock = Lock(1);
       runWrapper(reduceCommand).then((p) {
-        show(reduceCommand, p, showError: flags['error']);
+        show(reduceCommand, p, showError: flags['error']!);
         lock.decrease();
       });
       await lock.wait();
@@ -570,11 +564,8 @@ class MapReduce {
     this.tempDir.delete(recursive: true);
   }
 
-  void store(ProcessResult p, String stdoutFilePath, String stderrFilePath,
-      String statusFilePath) async {
-    if (p == null || p?.pid == 0) {
-      return;
-    }
+  Future<void> store(ProcessResult p, String stdoutFilePath,
+      String stderrFilePath, String statusFilePath) async {
     var lock = Lock(3);
 
     File(stdoutFilePath).open(mode: FileMode.write).then((f) {
